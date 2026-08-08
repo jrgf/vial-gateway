@@ -2,6 +2,8 @@
 
 The Compose stack is the supported integration and evaluation environment. It runs Redis with AOF, two sample upstreams, one gateway, one control service, a development-only OIDC provider, Prometheus, an OpenTelemetry Collector, and Tempo.
 
+The sample upstreams use the opt-in `demo` profile. The data-plane gateway starts without it so it can serve routes managed through the control plane.
+
 Do not expose the bundled credentials or demo OIDC provider to an untrusted network.
 
 ## Prerequisites
@@ -13,7 +15,7 @@ Do not expose the bundled credentials or demo OIDC provider to an untrusted netw
 ## Start
 
 ```sh
-docker compose up --build --detach
+docker compose --profile demo up --build --detach
 docker compose ps
 ```
 
@@ -36,7 +38,7 @@ CONTROL_PORT=18081 \
 PROMETHEUS_PORT=19090 \
 TEMPO_PORT=13200 \
 OIDC_PORT=15556 \
-docker compose up --build --detach
+docker compose --profile demo up --build --detach
 ```
 
 Use the same variables on later Compose commands so Compose retains the intended published ports.
@@ -96,4 +98,3 @@ Compose is useful for a controlled single-host deployment, but the checked-in fi
 - Use managed or separately operated Redis when configuration availability matters.
 
 For a multi-replica deployment, use the [Kubernetes guide](kubernetes.md).
-

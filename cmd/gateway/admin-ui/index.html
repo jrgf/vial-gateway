@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Gateway Console · Vial</title>
+  <link rel="stylesheet" href="/admin/assets/app.css">
+  <script src="/admin/assets/app.js" defer></script>
+</head>
+<body data-csrf="{{.CSRF}}">
+  <a class="skip-link" href="#content">Skip to content</a>
+  <aside class="sidebar">
+    <a class="brand" href="#statistics" aria-label="Vial Gateway home"><span class="brand-mark">V</span><span><strong>Vial</strong><small>Gateway console</small></span></a>
+    <nav aria-label="Gateway management">
+      <a href="#statistics" class="nav-link active">Statistics</a>
+      <a href="#routes" class="nav-link">Routes</a>
+      <a href="#configurations" class="nav-link">Configurations</a>
+      <a href="#access" class="nav-link">API keys</a>
+      <a href="#dynamic-dns" class="nav-link">Dynamic DNS</a>
+      <a href="#cache" class="nav-link">Cache</a>
+      <a href="#audit" class="nav-link">Audit log</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="identity"><span class="avatar" aria-hidden="true">{{initial .Subject}}</span><span><strong>{{.Subject}}</strong><small>Gateway administrator</small></span></div>
+      <form action="/admin/logout" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button ghost wide" type="submit">Sign out</button></form>
+    </div>
+  </aside>
+
+  <main id="content">
+    <header class="topbar">
+      <div><p class="eyebrow">Control plane</p><h1>Gateway statistics</h1></div>
+      <div class="top-actions"><span id="connection" class="status waiting"><i></i>Connecting</span><button id="refresh" class="button secondary" type="button">Refresh</button></div>
+    </header>
+
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+    <section id="statistics" class="section" aria-labelledby="statistics-title">
+      <div class="section-head"><div><p class="eyebrow">Traffic and health</p><h2 id="statistics-title">Live gateway statistics</h2></div><span id="last-updated" class="muted">Waiting for data</span></div>
+      <div class="stats">
+        <article class="stat"><span>Active version</span><strong id="stat-version">{{.Version}}</strong><small>Immutable configuration</small></article>
+        <article class="stat"><span>Routes</span><strong id="stat-routes">{{len .Routes}}</strong><small id="stat-policies">Policy inventory</small></article>
+        <article class="stat"><span>Upstreams healthy</span><strong id="stat-health">—</strong><small id="health-summary">Health checks loading</small></article>
+        <article class="stat"><span>Dynamic DNS</span><strong id="stat-dns">—</strong><small id="dns-summary">External IP worker</small></article>
+      </div>
+      <div class="panel service-panel">
+        <div><span class="pulse"></span><div><strong id="service-name">Vial Gateway</strong><small id="telemetry-summary">Telemetry loading</small></div></div>
+        <span id="schema-version" class="tag">Schema v1</span>
+      </div>
+      <div class="stats traffic-stats">
+        <article class="stat"><span>Requests / second</span><strong id="metric-rps">—</strong><small>Five-minute average</small></article>
+        <article class="stat"><span>Server error rate</span><strong id="metric-errors">—</strong><small>HTTP 5xx responses</small></article>
+        <article class="stat"><span>Upstream failures / second</span><strong id="metric-upstream">—</strong><small>Failed upstream attempts</small></article>
+        <article class="stat"><span>Cache hit rate</span><strong id="metric-cache">—</strong><small>Hits among cache lookups</small></article>
+      </div>
+      <div class="panel table-panel metric-panel">
+        <div class="panel-head"><div><h3>Traffic by route</h3><p>Requests per second over the last five minutes</p></div><span id="metrics-state" class="status waiting"><i></i>Loading</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Route</th><th>Requests / second</th></tr></thead><tbody id="metric-routes"><tr><td colspan="2" class="empty">Loading traffic statistics…</td></tr></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="routes" class="section" aria-labelledby="routes-title">
+      <div class="section-head"><div><p class="eyebrow">Data plane</p><h2 id="routes-title">Routes & upstreams</h2></div><div class="section-actions"><span id="route-count" class="count">{{len .Routes}} routes</span><button id="add-route" class="button primary" type="button">Add route</button></div></div>
+      <div class="panel table-panel"><div class="table-wrap"><table>
+        <thead><tr><th>Route</th><th>Match & methods</th><th>Policies</th><th>Upstreams</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody id="routes-body">{{range .Routes}}<tr><td><strong>{{.Name}}</strong></td><td><code>{{join .Methods}}</code><small>{{.PathPrefix}}</small></td><td><span class="tag">{{if .AuthPolicy}}{{.AuthPolicy}}{{else}}public{{end}}</span></td><td>{{len .Upstreams}}</td><td><span class="status waiting"><i></i>Checking</span></td><td></td></tr>{{else}}<tr><td colspan="6" class="empty">No routes are configured.</td></tr>{{end}}</tbody>
+      </table></div></div>
+    </section>
+
+    <dialog id="route-dialog" aria-labelledby="route-dialog-title">
+      <form id="route-form" class="dialog-form">
+        <div class="dialog-head"><div><p class="eyebrow">Atomic route update</p><h2 id="route-dialog-title">Add route</h2></div><button id="close-route" class="icon-button" type="button" aria-label="Close route editor">×</button></div>
+        <input id="route-original-name" type="hidden">
+        <div class="form-grid">
+          <label>Name<input id="route-name" maxlength="80" required placeholder="inventory"></label>
+          <label>Path prefix<input id="route-path" required placeholder="/api/inventory"></label>
+          <label>Hosts <span class="optional">optional · comma separated</span><input id="route-hosts" placeholder="api.example.com"></label>
+          <label>Path rewrite <span class="optional">optional</span><input id="route-rewrite" placeholder="/v1"></label>
+        </div>
+        <label>Upstream URLs <span class="optional">one per line</span><textarea id="route-upstreams" class="small-textarea" required placeholder="http://inventory:9001"></textarea></label>
+        <fieldset><legend>Allowed methods</legend><div id="route-methods" class="method-grid">
+          <label><input type="checkbox" value="GET">GET</label><label><input type="checkbox" value="POST">POST</label><label><input type="checkbox" value="PUT">PUT</label><label><input type="checkbox" value="PATCH">PATCH</label><label><input type="checkbox" value="DELETE">DELETE</label><label><input type="checkbox" value="HEAD">HEAD</label><label><input type="checkbox" value="OPTIONS">OPTIONS</label>
+        </div><label class="custom-methods">Custom methods <span class="optional">comma separated</span><input id="route-custom-methods" placeholder="PURGE"></label></fieldset>
+        <details><summary>Traffic policy options</summary><div class="form-grid details-grid">
+          <label>Auth policy<input id="route-auth" placeholder="default"></label>
+          <label>Required scopes<input id="route-scopes" placeholder="inventory.read"></label>
+          <label>Rate policy<input id="route-rate" placeholder="standard"></label>
+          <label>Cache policy<input id="route-cache" placeholder="short"></label>
+          <label>Health path<input id="route-health" placeholder="/health"></label>
+          <label>Timeout<input id="route-timeout" placeholder="15s"></label>
+          <label>Max body bytes<input id="route-max-body" type="number" min="0" step="1" placeholder="1048576"></label>
+          <label>Concurrency<input id="route-concurrency" type="number" min="0" step="1" placeholder="0"></label>
+          <label>Retries<input id="route-retries" type="number" min="0" step="1" placeholder="0"></label>
+          <label class="check-label"><input id="route-redirects" type="checkbox">Keep upstream redirects under path prefix</label>
+          <label class="check-label"><input id="route-streaming" type="checkbox">Streaming route</label>
+        </div></details>
+        <div class="dialog-foot"><p>Saving creates and atomically activates a new immutable configuration version.</p><div><button id="cancel-route" class="button ghost" type="button">Cancel</button><button id="save-route" class="button primary" type="submit">Save & activate</button></div></div>
+      </form>
+    </dialog>
+
+    <section id="configurations" class="section" aria-labelledby="config-title">
+      <div class="section-head"><div><p class="eyebrow">Version control</p><h2 id="config-title">Configurations</h2></div><button id="new-config" class="button secondary" type="button">New from active</button></div>
+      <div class="config-grid">
+        <article class="panel"><div class="panel-head"><div><h3>Version history</h3><p>Immutable snapshots stored in Redis</p></div></div><div id="versions" class="version-list"><p class="empty">Loading versions…</p></div></article>
+        <article class="panel editor-panel"><div class="panel-head"><div><h3 id="editor-title">Configuration editor</h3><p>Validate before saving a new version</p></div><span id="editor-state" class="tag">Not loaded</span></div>
+          <label class="sr-only" for="config-editor">Gateway configuration JSON</label><textarea id="config-editor" spellcheck="false" aria-describedby="editor-help"></textarea>
+          <div class="editor-foot"><small id="editor-help">JSON · schema version 1 · 2 MiB maximum</small><div><button id="format-config" class="button ghost" type="button">Format</button><button id="validate-config" class="button secondary" type="button">Validate</button><button id="save-config" class="button primary" type="button">Save version</button></div></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="access" class="section" aria-labelledby="access-title">
+      <div class="section-head"><div><p class="eyebrow">Credentials</p><h2 id="access-title">API keys</h2></div><span class="muted">Secrets appear once</span></div>
+      <div id="secret-panel" class="secret-panel" hidden><div><strong>Copy this key now</strong><p>The secret cannot be retrieved after you leave this page.</p></div><code id="new-secret"></code><button id="copy-secret" class="button secondary" type="button">Copy</button><button id="dismiss-secret" class="icon-button" type="button" aria-label="Dismiss secret">×</button></div>
+      <div class="access-grid">
+        <form id="key-form" class="panel compact-form"><div class="panel-head"><div><h3>Create API key</h3><p>Grant only the scopes this client needs</p></div></div><label>Name<input id="key-name" name="name" autocomplete="off" maxlength="80" required placeholder="billing-service"></label><label>Scopes<input id="key-scopes" name="scopes" autocomplete="off" required placeholder="orders.read, orders.write"><small>Separate scopes with commas or spaces.</small></label><button class="button primary" type="submit">Create key</button></form>
+        <article class="panel table-panel"><div class="panel-head"><div><h3>Issued keys</h3><p>Active and revoked credentials</p></div></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Scopes</th><th>Created</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="keys-body"><tr><td colspan="5" class="empty">Loading keys…</td></tr></tbody></table></div></article>
+      </div>
+    </section>
+
+    <section id="dynamic-dns" class="section" aria-labelledby="ddns-title">
+      <div class="section-head"><div><p class="eyebrow">Public connectivity</p><h2 id="ddns-title">Dynamic DNS</h2></div><span id="ddns-state" class="status waiting"><i></i>Loading</span></div>
+      <div class="ddns-grid">
+        <form id="ddns-form" class="panel">
+          <div class="panel-head"><div><h3>External IP synchronization</h3><p>Update your DNS provider whenever the gateway's public IP changes.</p></div><label class="switch"><input id="ddns-enabled" type="checkbox"><span></span><b>Enabled</b></label></div>
+          <label>Public IP check URL<input id="ddns-check-url" type="url" placeholder="https://api.ipify.org"></label>
+          <label>DNS update URL <span class="optional">must contain {ip}</span><input id="ddns-update-url" inputmode="url" placeholder="https://dns-provider.example/update?address={ip}"></label>
+          <div class="form-grid"><label>Check interval<input id="ddns-interval" placeholder="5m"></label><label>Request timeout<input id="ddns-timeout" placeholder="10s"></label></div>
+          <div class="editor-foot"><small>Minimum interval: 10s. HTTPS is required in production.</small><button id="save-ddns" class="button primary" type="submit">Save & activate</button></div>
+        </form>
+        <aside class="panel feature-card">
+          <span class="feature-icon" aria-hidden="true">↗</span><div><p class="eyebrow">Secure credential handling</p><h3 id="ddns-token">Bearer token status loading</h3><p>The optional provider token is read from <code>VIAL_DYNAMIC_DNS_BEARER_TOKEN</code>. It is deliberately excluded from configuration versions, Redis, audit targets, and this browser session.</p></div>
+          <div class="callout"><strong>What happens after activation?</strong><p>The worker checks immediately, updates only when the canonical IPv4 or IPv6 address changes, and retries failed updates without losing the last successful state.</p></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="cache" class="section" aria-labelledby="cache-title">
+      <div class="section-head"><div><p class="eyebrow">Operations</p><h2 id="cache-title">Cache management</h2></div></div>
+      <form id="cache-form" class="panel inline-form"><div><h3>Invalidate cached responses</h3><p>Clear one route or the complete gateway cache.</p></div><label><span>Scope</span><select id="cache-route"><option value="">All routes</option></select></label><button class="button danger" type="submit">Invalidate cache</button></form>
+    </section>
+
+    <section id="audit" class="section" aria-labelledby="audit-title">
+      <div class="section-head"><div><p class="eyebrow">Accountability</p><h2 id="audit-title">Audit log</h2></div><button id="refresh-audit" class="button secondary" type="button">Refresh log</button></div>
+      <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead><tbody id="audit-body"><tr><td colspan="4" class="empty">Loading audit events…</td></tr></tbody></table></div><div class="pagination"><span id="audit-page" class="muted">Page 1</span><div><button id="audit-previous" class="button ghost" type="button" disabled>Previous</button><button id="audit-next" class="button secondary" type="button" disabled>Next</button></div></div></div>
+    </section>
+    <footer>Vial Gateway control plane <span>·</span> API <code>/admin/v1</code></footer>
+  </main>
+</body>
+</html>

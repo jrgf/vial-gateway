@@ -20,7 +20,7 @@ A configuration-driven Go API gateway with an atomically reloadable data plane, 
 Start the complete development stack:
 
 ```sh
-docker compose up --build --detach
+docker compose --profile demo up --build --detach
 ./scripts/curl-smoke.sh
 ```
 

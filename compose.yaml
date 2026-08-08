@@ -16,6 +16,7 @@ services:
 
   users:
     <<: *runtime
+    profiles: [demo]
     command: ["backend"]
     environment:
       VIAL_HTTP_HOST: "0.0.0.0"
@@ -24,6 +25,7 @@ services:
 
   orders:
     <<: *runtime
+    profiles: [demo]
     command: ["backend"]
     environment:
       VIAL_HTTP_HOST: "0.0.0.0"
@@ -37,10 +39,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      users:
-        condition: service_started
-      orders:
-        condition: service_started
       otel-collector:
         condition: service_started
     ports:

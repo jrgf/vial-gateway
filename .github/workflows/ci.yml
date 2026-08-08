@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose up --build --detach
+      - run: docker compose --profile demo up --build --detach
       - name: Wait for readiness
         run: |
           for attempt in $(seq 1 60); do
@@ -57,7 +57,7 @@ jobs:
       - run: ./scripts/curl-smoke.sh
       - run: ./scripts/load-smoke.sh
       - if: always()
-        run: docker compose down --volumes
+        run: docker compose --profile demo down --volumes
 
   kind:
     runs-on: ubuntu-latest
