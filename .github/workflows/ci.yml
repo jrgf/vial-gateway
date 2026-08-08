@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: govulncheck ./...
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker build -t vial-gateway:ci .
+      - uses: anchore/sbom-action@v0
+        with:
+          image: vial-gateway:ci
+          artifact-name: vial-gateway.spdx.json
+          output-file: /tmp/vial-gateway.spdx.json
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: vial-gateway:ci
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up --build --detach
+      - name: Wait for readiness
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/health/ready >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - run: ./scripts/curl-smoke.sh
+      - run: ./scripts/load-smoke.sh
+      - if: always()
+        run: docker compose down --volumes
+
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.12.0
+      - run: docker build -t vial-gateway:local .
+      - run: kind load docker-image vial-gateway:local
+      - run: kubectl apply -f deploy/kubernetes/all.yaml
+      - run: kubectl rollout status deployment/redis --timeout=180s
+      - run: kubectl rollout status deployment/users --timeout=180s
+      - run: kubectl rollout status deployment/vial-gateway --timeout=180s
+      - run: kubectl rollout status deployment/vial-control --timeout=180s
+      - name: Smoke gateway
+        run: |
+          kubectl port-forward service/vial-gateway 18080:80 &
+          forward_pid=$!
+          trap 'kill "$forward_pid"' EXIT
+          sleep 3
+          curl --fail --silent http://127.0.0.1:18080/health/live
+          curl --fail --silent -H 'X-API-Key: development-only-key' http://127.0.0.1:18080/api/users/kind

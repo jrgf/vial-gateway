@@ -1,0 +1,109 @@
+{
+  "environment": "development",
+  "http": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "redis_url": "redis://127.0.0.1:6379/0",
+  "admin": {
+    "enabled": true,
+    "external_url": "http://127.0.0.1:8080",
+    "bootstrap_key_sha256": "2793624a6c8a27584db4920b94f2cf0588d5fecc581f43c05a16dd549e4435f3",
+    "oidc_issuer": "",
+    "oidc_client_id": "",
+    "oidc_client_secret": "",
+    "oidc_scopes": [],
+    "prometheus_url": "http://127.0.0.1:9090",
+    "session_ttl": "8h"
+  },
+  "tls": {},
+  "gateway": {
+    "schema_version": 1,
+    "version": 1,
+    "max_header_bytes": 1048576,
+    "trusted_proxies": ["127.0.0.1/32", "::1/128"],
+    "cors_allowed_origins": ["http://localhost:3000"],
+    "telemetry": {
+      "service_name": "vial-gateway",
+      "otlp_http_endpoint": ""
+    },
+    "dynamic_dns": {
+      "enabled": false,
+      "check_url": "https://api.ipify.org",
+      "update_url": "https://ddns.example.net/update?ip={ip}",
+      "interval": "5m",
+      "timeout": "10s"
+    },
+    "auth_policies": {
+      "development": {
+        "type": "api_key",
+        "keys": [
+          {
+            "name": "local-client",
+            "sha256": "85faa70ec35c95a1253ed6269566f8d25a4b6920c7193d996f7668a37e3f215e",
+            "scopes": ["users.read", "users.write", "orders.read", "orders.write"]
+          }
+        ]
+      }
+    },
+    "rate_policies": {
+      "standard": {
+        "requests": 100,
+        "burst": 20,
+        "window": "1m"
+      }
+    },
+    "cache_policies": {
+      "private-short": {
+        "ttl": "30s",
+        "max_body_bytes": 262144,
+        "per_principal": true,
+        "vary_headers": ["Accept"]
+      }
+    },
+    "routes": [
+      {
+        "name": "users",
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+        "path_prefix": "/api/users",
+        "path_rewrite": "/",
+        "rewrite_redirects": false,
+        "upstreams": ["http://127.0.0.1:9001"],
+        "health_path": "/health",
+        "health_interval": "10s",
+        "timeout": "10s",
+        "max_body_bytes": 1048576,
+        "auth_policy": "development",
+        "scopes": ["users.read"],
+        "rate_policy": "standard",
+        "concurrency": 64,
+        "retries": 1,
+        "circuit_breaker": {"failures": 5, "open_for": "30s"},
+        "cache_policy": "private-short",
+        "request_transform": {"set_headers": {"X-Gateway": "vial"}},
+        "response_transform": {"remove_headers": ["Server"]}
+      },
+      {
+        "name": "orders",
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+        "path_prefix": "/api/orders",
+        "path_rewrite": "/",
+        "rewrite_redirects": false,
+        "upstreams": ["http://127.0.0.1:9002"],
+        "health_path": "/health",
+        "health_interval": "10s",
+        "timeout": "10s",
+        "max_body_bytes": 1048576,
+        "auth_policy": "development",
+        "scopes": ["orders.read"],
+        "rate_policy": "standard",
+        "concurrency": 64,
+        "retries": 1,
+        "circuit_breaker": {"failures": 5, "open_for": "30s"},
+        "cache_policy": "private-short",
+        "request_transform": {"set_headers": {"X-Gateway": "vial"}},
+        "response_transform": {"remove_headers": ["Server"]}
+      }
+    ]
+  }
+}

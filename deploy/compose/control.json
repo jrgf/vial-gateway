@@ -1,0 +1,18 @@
+{
+  "environment": "development",
+  "http": {"host": "0.0.0.0", "port": 8081},
+  "redis_url": "redis://redis:6379/0",
+  "control_only": true,
+  "admin": {
+    "enabled": true,
+    "external_url": "http://127.0.0.1:8081",
+    "bootstrap_key_sha256": "2793624a6c8a27584db4920b94f2cf0588d5fecc581f43c05a16dd549e4435f3",
+    "oidc_issuer": "",
+    "oidc_client_id": "",
+    "oidc_client_secret": "",
+    "oidc_scopes": ["profile", "email", "gateway.admin"],
+    "prometheus_url": "http://prometheus:9090",
+    "session_ttl": "8h"
+  },
+  "gateway": {"schema_version": 1, "version": 1, "routes": [], "telemetry": {"service_name": "vial-control"}}
+}

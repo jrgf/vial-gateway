@@ -1,0 +1,118 @@
+x-runtime: &runtime
+  image: vial-gateway:local
+  restart: unless-stopped
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - redis-data:/data
+
+  users:
+    <<: *runtime
+    command: ["backend"]
+    environment:
+      VIAL_HTTP_HOST: "0.0.0.0"
+      VIAL_HTTP_PORT: "9001"
+      VIAL_BACKEND_NAME: users
+
+  orders:
+    <<: *runtime
+    command: ["backend"]
+    environment:
+      VIAL_HTTP_HOST: "0.0.0.0"
+      VIAL_HTTP_PORT: "9002"
+      VIAL_BACKEND_NAME: orders
+
+  gateway:
+    <<: *runtime
+    build: .
+    command: ["gateway", "--config", "/app/config.json"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      users:
+        condition: service_started
+      orders:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/compose/gateway.json:/app/config.json:ro
+
+  control:
+    <<: *runtime
+    command: ["gateway", "--config", "/app/config.json"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      oidc:
+        condition: service_started
+      prometheus:
+        condition: service_started
+    environment:
+      VIAL_ADMIN_EXTERNAL_URL: "http://127.0.0.1:${CONTROL_PORT:-8081}"
+      VIAL_ADMIN_OIDC_ISSUER: "http://oidc.localhost:${OIDC_PORT:-25556}"
+      VIAL_ADMIN_OIDC_CLIENT_ID: vial-gateway
+      VIAL_ADMIN_OIDC_CLIENT_SECRET: demo-secret
+      VIAL_ADMIN_PROMETHEUS_URL: "http://prometheus:9090"
+    ports:
+      - "${CONTROL_PORT:-8081}:8081"
+    volumes:
+      - ./deploy/compose/control.json:/app/config.json:ro
+
+  oidc:
+    <<: *runtime
+    command: ["demo-oidc"]
+    environment:
+      OIDC_PORT: "${OIDC_PORT:-25556}"
+      OIDC_ISSUER: "http://oidc.localhost:${OIDC_PORT:-25556}"
+      OIDC_CLIENT_ID: vial-gateway
+      OIDC_CLIENT_SECRET: demo-secret
+      OIDC_REDIRECT_URI: "http://127.0.0.1:${CONTROL_PORT:-8081}/admin/callback"
+      OIDC_USERNAME: admin@example.com
+      OIDC_PASSWORD: admin
+    ports:
+      - "${OIDC_PORT:-25556}:${OIDC_PORT:-25556}"
+    networks:
+      default:
+        aliases: [oidc.localhost]
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.121.0
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes:
+      - ./deploy/compose/otel-collector.yml:/etc/otelcol/config.yml:ro
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    command: ["-config.file=/etc/tempo.yml"]
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"
+    volumes:
+      - ./deploy/compose/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
+
+volumes:
+  redis-data:
+  prometheus-data:
+  tempo-data:

@@ -1,0 +1,271 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vial-gateway-config
+data:
+  gateway.json: |
+    {
+      "environment": "production",
+      "http": {"host": "0.0.0.0", "port": 8080},
+      "admin": {"enabled": false, "session_ttl": "8h"},
+      "gateway": {
+        "schema_version": 1,
+        "version": 1,
+        "max_header_bytes": 1048576,
+        "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+        "telemetry": {"service_name": "vial-gateway"},
+        "dynamic_dns": {"enabled": false},
+        "auth_policies": {
+          "clients": {"type": "api_key", "keys": [{"name": "bootstrap-client", "sha256": "85faa70ec35c95a1253ed6269566f8d25a4b6920c7193d996f7668a37e3f215e", "scopes": ["users.read"]}]}
+        },
+        "rate_policies": {"standard": {"requests": 100, "burst": 20, "window": "1m"}},
+        "cache_policies": {"private-short": {"ttl": "30s", "max_body_bytes": 262144, "per_principal": true}},
+        "routes": [{
+          "name": "users", "methods": ["GET", "POST"], "path_prefix": "/api/users", "path_rewrite": "/",
+          "upstreams": ["http://users:9001"], "health_path": "/health", "health_interval": "10s",
+          "timeout": "10s", "max_body_bytes": 1048576, "auth_policy": "clients", "scopes": ["users.read"],
+          "rate_policy": "standard", "concurrency": 64, "retries": 1,
+          "circuit_breaker": {"failures": 5, "open_for": "30s"}, "cache_policy": "private-short"
+        }]
+      }
+    }
+  control.json: |
+    {
+      "environment": "production",
+      "http": {"host": "0.0.0.0", "port": 8081},
+      "control_only": true,
+      "admin": {
+        "enabled": true,
+        "external_url": "https://gateway.example.com",
+        "oidc_issuer": "https://id.example.com",
+        "oidc_client_id": "vial-gateway",
+        "oidc_scopes": ["profile", "email", "gateway.admin"],
+        "session_ttl": "8h"
+      },
+      "gateway": {"schema_version": 1, "version": 1, "routes": [], "telemetry": {"service_name": "vial-control"}}
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vial-gateway-secrets
+type: Opaque
+stringData:
+  VIAL_REDIS_URL: redis://redis:6379/0
+  VIAL_ADMIN_BOOTSTRAP_KEY_SHA256: 2793624a6c8a27584db4920b94f2cf0588d5fecc581f43c05a16dd549e4435f3
+  VIAL_ADMIN_OIDC_CLIENT_SECRET: replace-me
+  VIAL_DYNAMIC_DNS_BEARER_TOKEN: replace-me
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vial-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: vial-gateway}
+  template:
+    metadata:
+      labels: {app: vial-gateway}
+    spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: gateway
+          image: vial-gateway:local
+          imagePullPolicy: IfNotPresent
+          args: ["gateway", "--config", "/etc/vial/gateway.json"]
+          envFrom:
+            - secretRef: {name: vial-gateway-secrets}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/vial, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: vial-gateway-config, items: [{key: gateway.json, path: gateway.json}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vial-gateway
+spec:
+  selector: {app: vial-gateway}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vial-control
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: vial-control}
+  template:
+    metadata:
+      labels: {app: vial-control}
+    spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: control
+          image: vial-gateway:local
+          imagePullPolicy: IfNotPresent
+          args: ["gateway", "--config", "/etc/vial/control.json"]
+          envFrom:
+            - secretRef: {name: vial-gateway-secrets}
+          ports:
+            - {name: http, containerPort: 8081}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 25m, memory: 48Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/vial, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: vial-gateway-config, items: [{key: control.json, path: control.json}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vial-control
+spec:
+  selector: {app: vial-control}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: users}
+  template:
+    metadata:
+      labels: {app: users}
+    spec:
+      containers:
+        - name: users
+          image: vial-gateway:local
+          imagePullPolicy: IfNotPresent
+          args: ["backend"]
+          env:
+            - {name: VIAL_HTTP_HOST, value: "0.0.0.0"}
+            - {name: VIAL_HTTP_PORT, value: "9001"}
+            - {name: VIAL_BACKEND_NAME, value: users}
+          ports:
+            - {name: http, containerPort: 9001}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 250m, memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: users
+spec:
+  selector: {app: users}
+  ports:
+    - {name: http, port: 9001, targetPort: http}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: redis}
+  template:
+    metadata:
+      labels: {app: redis}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - {name: redis, containerPort: 6379}
+          readinessProbe: {tcpSocket: {port: redis}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: redis}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: redis-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector: {app: redis}
+  ports:
+    - {name: redis, port: 6379, targetPort: redis}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vial-gateway
+spec:
+  tls:
+    - hosts: [gateway.example.com]
+      secretName: vial-gateway-tls
+  rules:
+    - host: gateway.example.com
+      http:
+        paths:
+          - path: /admin
+            pathType: Prefix
+            backend: {service: {name: vial-control, port: {name: http}}}
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: vial-gateway, port: {name: http}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress
+spec:
+  podSelector: {matchLabels: {app: redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchExpressions: [{key: app, operator: In, values: [vial-gateway, vial-control]}]}
+      ports:
+        - {protocol: TCP, port: 6379}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: users-ingress
+spec:
+  podSelector: {matchLabels: {app: users}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: vial-gateway}}
+      ports:
+        - {protocol: TCP, port: 9001}

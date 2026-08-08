@@ -1,0 +1,23 @@
+{
+  "environment": "development",
+  "http": {"host": "0.0.0.0", "port": 8080},
+  "redis_url": "redis://redis:6379/0",
+  "admin": {"enabled": false, "session_ttl": "8h"},
+  "gateway": {
+    "schema_version": 1,
+    "version": 1,
+    "max_header_bytes": 1048576,
+    "cors_allowed_origins": ["http://localhost:3000"],
+    "telemetry": {"service_name": "vial-gateway", "otlp_http_endpoint": "http://otel-collector:4318/v1/traces"},
+    "dynamic_dns": {"enabled": false},
+    "auth_policies": {
+      "development": {"type": "api_key", "keys": [{"name": "local-client", "sha256": "85faa70ec35c95a1253ed6269566f8d25a4b6920c7193d996f7668a37e3f215e", "scopes": ["users.read", "orders.read"]}]}
+    },
+    "rate_policies": {"standard": {"requests": 100, "burst": 20, "window": "1m"}},
+    "cache_policies": {"private-short": {"ttl": "30s", "max_body_bytes": 262144, "per_principal": true, "vary_headers": ["Accept"]}},
+    "routes": [
+      {"name": "users", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"], "path_prefix": "/api/users", "path_rewrite": "/", "upstreams": ["http://users:9001"], "health_path": "/health", "health_interval": "10s", "timeout": "10s", "max_body_bytes": 1048576, "auth_policy": "development", "scopes": ["users.read"], "rate_policy": "standard", "concurrency": 64, "retries": 1, "circuit_breaker": {"failures": 5, "open_for": "30s"}, "cache_policy": "private-short"},
+      {"name": "orders", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"], "path_prefix": "/api/orders", "path_rewrite": "/", "upstreams": ["http://orders:9002"], "health_path": "/health", "health_interval": "10s", "timeout": "10s", "max_body_bytes": 1048576, "auth_policy": "development", "scopes": ["orders.read"], "rate_policy": "standard", "concurrency": 64, "retries": 1, "circuit_breaker": {"failures": 5, "open_for": "30s"}, "cache_policy": "private-short"}
+    ]
+  }
+}
