@@ -33,7 +33,7 @@ jobs:
           image: vial-gateway:ci
           artifact-name: vial-gateway.spdx.json
           output-file: /tmp/vial-gateway.spdx.json
-      - uses: aquasecurity/trivy-action@v0.28.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: vial-gateway:ci
           format: table
@@ -64,6 +64,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: kind
       - run: docker build -t vial-gateway:local .
       - run: kind load docker-image vial-gateway:local
       - run: kubectl apply -f deploy/kubernetes/all.yaml
